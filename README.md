@@ -70,8 +70,33 @@ npm run dev
 | 存储分层 | `storage_tier` | 分层规则 | 分层编号、所属湖表、热层判定 |
 | 保留窗口 | `retention_window` | 保留窗口 | 窗口编号、所属湖表、保留粒度 |
 | 消费视图 | `publish_view` | 消费视图 | 视图编号、所属湖表、视图定义 |
+| 交付视图 | `delivery_view` | 交付视图 | 交付编号、消费方、基准/交付快照 |
 | 资源额度计量 | `quota_meter` | 额度读数 | 读数编号、所属湖表、额度类型 |
 | 湖表审计 | `lake_audit` | 审计条目 | 条目编号、所属湖表、操作类型 |
+
+## 消费方交付视图
+
+在原「消费视图」之外新增按消费方隔离的交付视图。一次交付对应两次可用快照之间的交接，包含：
+
+- `added` / `added_files`：本次新增文件；
+- `withdrawn` / `removed` / `withdrawn_files`：本次撤回文件；
+- `pages`、`page_token` / `page_credential`：页凭据，确认时校验消费方与交付编号；
+- `checkpoint_position`：该消费方的连续确认位点，不能被其他消费方使用；
+- `conflicts`：未确认旧页对应的新增文件已在新快照被撤回时的冲突说明；
+- `retained_files` 与 `withdrawn_files`：交付概览中的当前留存和已撤回清单。
+
+常用接口：
+
+```text
+POST /api/publish_view/refresh              # 刷新并生成消费方变更列表
+POST /api/publish_view/ack                  # 用页/变更/位点或页凭据确认
+POST /api/publish_view/reconnect            # 重连续取，返回旧页冲突与当前交付
+GET  /api/publish_view/overview             # 当前留存/已撤回概览
+GET  /api/deliveries/{delivery_id}          # 交付详情
+GET  /api/deliveries/{delivery_id}/replay   # 按交付编号回放实际确认范围
+```
+
+时间旅行的 `read_at_snapshot(table, snapshot_id)` 始终返回快照原始 `file_ids`；文件被回收后会在 `files` / `file_details` 中标记 `recycled=true`。`TimeTravelService.replay_delivery(delivery_id, consumer_id=None)` 则按同一交付编号回放该消费方实际确认后的文件范围、撤回及其确认位置，并给出与普通按版查询的对齐结果。
 
 ## 约定
 

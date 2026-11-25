@@ -130,6 +130,10 @@ class LakeStore:
         # 文件注册表：lake_table -> {file_id -> PartitionFile}
         self._files: dict[str, dict[str, PartitionFile]] = {}
 
+        # 已回收文件的档案：保留元数据，供旧快照按编号回溯原始清单。
+        self._archived_files: dict[str, dict[str, PartitionFile]] = {}
+        self._recycled_files: dict[str, dict[str, Any]] = {}
+
         # 快照链：lake_table -> list[LakeSnapshot]（时间序）
         self._snapshots: dict[str, list[LakeSnapshot]] = {}
 
@@ -176,14 +180,56 @@ class LakeStore:
     def get_file(self, lake_table: str, file_id: str) -> PartitionFile | None:
         return self._files.get(lake_table, {}).get(file_id)
 
+    def get_archived_file(self, lake_table: str, file_id: str) -> PartitionFile | None:
+        """读取已回收文件的历史元数据；不会把文件重新视为可读文件。"""
+        return self._archived_files.get(lake_table, {}).get(file_id)
+
+    def get_historical_file(self, lake_table: str, file_id: str) -> PartitionFile | None:
+        """优先读当前文件，找不到时回退到回收档案。"""
+        return self.get_file(lake_table, file_id) or self.get_archived_file(lake_table, file_id)
+
+    def is_file_recycled(self, lake_table: str, file_id: str) -> bool:
+        return self.get_file(lake_table, file_id) is None and (
+            file_id in self._archived_files.get(lake_table, {})
+            or file_id in self._recycled_files.get(lake_table, {})
+        )
+
     def remove_files(self, lake_table: str, file_ids: list[str]) -> int:
         table_files = self._files.get(lake_table, {})
+        archive = self._archived_files.setdefault(lake_table, {})
         removed = 0
         for fid in file_ids:
             if fid in table_files:
+                # 物理回收前封存元数据，保证旧快照清单仍可独立回溯。
+                archive[fid] = table_files[fid]
                 del table_files[fid]
+                self._recycled_files.setdefault(lake_table, {})[fid] = {
+                    "file_id": fid,
+                    "recycled_at": time.time(),
+                }
                 removed += 1
         return removed
+
+    def recycle_files(self, lake_table: str, file_ids: list[str]) -> dict[str, Any]:
+        """回收文件并保留档案；重复回收保持幂等。"""
+        known_before = {
+            fid: self.get_historical_file(lake_table, fid) is not None
+            for fid in file_ids
+        }
+        removed = self.remove_files(lake_table, file_ids)
+        for fid in file_ids:
+            self._recycled_files.setdefault(lake_table, {})[fid] = {
+                "file_id": fid,
+                "recycled_at": time.time(),
+            }
+        return {
+            "lake_table": lake_table,
+            "file_ids": list(file_ids),
+            "removed_count": removed,
+            "recycled_count": len(file_ids),
+            "known_before": known_before,
+            "recycled_at": time.time(),
+        }
 
     def replace_file_list(
         self, lake_table: str, old_file_ids: list[str], new_files: list[PartitionFile]

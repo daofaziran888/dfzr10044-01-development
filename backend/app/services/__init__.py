@@ -22,6 +22,7 @@ from app.services.rebuild_backfill import RebuildBackfillService
 from app.services.storage_tier import StorageTierService
 from app.services.retention_window import RetentionWindowService
 from app.services.publish_view import PublishViewService
+from app.services.delivery_view import DeliveryViewService
 from app.services.quota_meter import QuotaMeterService
 from app.services.lake_audit import LakeAuditService
 
@@ -46,6 +47,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "storage_tier": StorageTierService(),
     "retention_window": RetentionWindowService(),
     "publish_view": PublishViewService(),
+    "delivery_view": DeliveryViewService(),
     "quota_meter": QuotaMeterService(),
     "lake_audit": LakeAuditService(),
 }
